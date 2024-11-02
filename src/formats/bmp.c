@@ -61,7 +61,7 @@ struct __attribute__((__packed__)) bmp_info {
 };
 
 // Masks used for for 16bit images
-struct __attribute__((__packed__)) bmp_mask {
+struct bmp_mask {
     uint32_t red;
     uint32_t green;
     uint32_t blue;
@@ -70,7 +70,7 @@ struct __attribute__((__packed__)) bmp_mask {
 
 // Color palette
 struct bmp_palette {
-    const uint32_t* table;
+    uint32_t* table;
     size_t size;
 };
 
@@ -166,11 +166,14 @@ static bool decode_masked(struct image* ctx, const struct bmp_info* bmp,
         const uint8_t* src_y = buffer + y * stride;
         for (size_t x = 0; x < pm->width; ++x) {
             const uint8_t* src = src_y + x * (bmp->bpp / BITS_PER_BYTE);
-            uint32_t m, r, g, b, a;
+            uint32_t m = 0, r, g, b, a;
+
             if (bmp->bpp == 32) {
-                m = *(uint32_t*)src;
+                memcpy(&m, src, sizeof(uint32_t));
             } else if (bmp->bpp == 16) {
-                m = *(uint16_t*)src;
+                uint16_t val;
+                memcpy(&val, src, sizeof(uint16_t));
+                m = (uint32_t)val;
             } else {
                 return false;
             }
@@ -330,10 +333,10 @@ static bool decode_rgb(struct image* ctx, const struct bmp_info* bmp,
         const uint8_t* src_y = buffer + y * stride;
         for (size_t x = 0; x < pm->width; ++x) {
             const uint8_t* src = src_y + x * (bmp->bpp / BITS_PER_BYTE);
-            if (bmp->bpp == 32) {
-                dst[x] = ARGB_SET_A(0xff) | *(uint32_t*)src;
-            } else if (bmp->bpp == 24) {
-                dst[x] = ARGB_SET_A(0xff) | *(uint32_t*)src;
+            if (bmp->bpp == 32 || bmp->bpp == 24) {
+                uint32_t val;
+                memcpy(&val, src, sizeof(val));
+                dst[x] = ARGB_SET_A(0xff) | val;
             } else if (bmp->bpp == 8 || bmp->bpp == 4 || bmp->bpp == 1) {
                 // indexed colors
                 const size_t bits_offset = x * bmp->bpp;
@@ -366,8 +369,9 @@ enum loader_status decode_bmp(struct image* ctx, const uint8_t* data,
     const void* color_data;
     size_t color_data_sz;
     struct bmp_palette palette;
-    const uint32_t* mask_location;
     struct bmp_mask mask;
+    uint32_t mask_tmp[4] = { 0 };
+
     bool rc;
 
     hdr = (const struct bmp_file*)data;
@@ -391,26 +395,26 @@ enum loader_status decode_bmp(struct image* ctx, const uint8_t* data,
 
     color_data = (const uint8_t*)bmp + bmp->dib_size;
     color_data_sz = hdr->offset - sizeof(struct bmp_file) - bmp->dib_size;
-    palette.table = color_data;
     palette.size = color_data_sz / sizeof(uint32_t);
+    palette.table = malloc(palette.size * sizeof(uint32_t));
+    if (!palette.table) {
+        return ldr_fmterror;
+    }
+    memcpy(palette.table, color_data, palette.size * sizeof(uint32_t));
 
     // create mask
     if (bmp->dib_size > BITMAPINFOHEADER_SIZE) {
-        mask_location = (const uint32_t*)(bmp + 1);
+        memcpy(&mask_tmp, bmp + 1, sizeof(mask_tmp));
     } else {
-        mask_location =
-            (color_data_sz >= 3 * sizeof(uint32_t) ? color_data : NULL);
+        if (color_data_sz >= 3 * sizeof(uint32_t)) {
+            memcpy(mask_tmp, color_data, sizeof(mask_tmp));
+        }
     }
 
-    if (!mask_location) {
-        mask.red = mask.green = mask.blue = mask.alpha = 0;
-    } else {
-        mask.red = mask_location[0];
-        mask.green = mask_location[1];
-        mask.blue = mask_location[2];
-        mask.alpha =
-            bmp->dib_size > BITMAPINFOV2HEADER_SIZE ? mask_location[3] : 0;
-    }
+    mask.red = mask_tmp[0];
+    mask.green = mask_tmp[1];
+    mask.blue = mask_tmp[2];
+    mask.alpha = bmp->dib_size > BITMAPINFOV2HEADER_SIZE ? mask_tmp[3] : 0;
 
     // decode bitmap
     if (bmp->compression == BI_BITFIELDS || bmp->bpp == 16) {
@@ -428,6 +432,8 @@ enum loader_status decode_bmp(struct image* ctx, const uint8_t* data,
     } else {
         rc = false;
     }
+
+    free(palette.table);
 
     if (rc) {
         if (bmp->height > 0) {
