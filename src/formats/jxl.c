@@ -5,6 +5,8 @@
 #include "loader.h"
 
 #include <jxl/decode.h>
+#include <jxl/parallel_runner.h>
+#include <jxl/resizable_parallel_runner.h>
 #include <stdlib.h>
 
 // JPEG XL loader implementation
@@ -15,6 +17,7 @@ enum image_status decode_jxl(struct imgdata* img, const uint8_t* data,
     JxlBasicInfo info = { 0 };
     JxlDecoderStatus status;
     struct pixmap* pm = NULL;
+    JxlParallelRunner* runner;
 
     const JxlPixelFormat jxl_format = { .num_channels = 4, // ARBG
                                         .data_type = JXL_TYPE_UINT8,
@@ -35,10 +38,25 @@ enum image_status decode_jxl(struct imgdata* img, const uint8_t* data,
     if (!jxl) {
         return imgload_fmterror;
     }
+
+    runner = JxlResizableParallelRunnerCreate(NULL);
+    if (runner == NULL) {
+        JxlDecoderDestroy(jxl);
+        return imgload_fmterror;
+    }
+
+    status =
+        JxlDecoderSetParallelRunner(jxl, JxlResizableParallelRunner, runner);
+    if (status != JXL_DEC_SUCCESS) {
+        goto done;
+    }
+
     status = JxlDecoderSetInput(jxl, data, size);
     if (status != JXL_DEC_SUCCESS) {
         goto done;
     }
+
+    JxlDecoderCloseInput(jxl);
 
     // process decoding
     status = JxlDecoderSubscribeEvents(
@@ -65,6 +83,11 @@ enum image_status decode_jxl(struct imgdata* img, const uint8_t* data,
                     status = rc;
                     goto done;
                 }
+
+                JxlResizableParallelRunnerSetThreads(
+                    runner,
+                    JxlResizableParallelRunnerSuggestThreads(info.xsize,
+                                                             info.ysize));
             } break;
             case JXL_DEC_FULL_IMAGE:
                 // frame loaded
@@ -149,6 +172,7 @@ enum image_status decode_jxl(struct imgdata* img, const uint8_t* data,
                      info.bits_per_sample * info.num_color_channels +
                          info.alpha_bits);
 done:
+    JxlResizableParallelRunnerDestroy(runner);
     JxlDecoderDestroy(jxl);
     return status == JXL_DEC_SUCCESS ? imgload_success : imgload_fmterror;
 }

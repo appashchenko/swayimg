@@ -94,6 +94,7 @@ test(
             avif,
             jpeg,
             jxl,
+            jxl_threads,
             png,
             rsvg,
             tiff,

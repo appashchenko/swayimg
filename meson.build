@@ -50,6 +50,7 @@ heif = dependency('libheif', required: get_option('heif'))
 avif = dependency('libavif', required: get_option('avif'))
 jpeg = dependency('libjpeg', required: get_option('jpeg'))
 jxl = dependency('libjxl', required: get_option('jxl'))
+jxl_threads = dependency('libjxl_threads', required: get_option('jxl'))
 png = dependency('libpng', required: get_option('png'))
 rsvg = dependency('librsvg-2.0', version: '>=2.46', required: get_option('svg'))
 tiff = dependency('libtiff-4', required: get_option('tiff'))
@@ -333,6 +334,7 @@ executable(
         avif,
         jpeg,
         jxl,
+        jxl_threads,
         png,
         rsvg,
         tiff,
